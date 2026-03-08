@@ -239,6 +239,25 @@ namespace YarnLanguageServer
             return base.VisitJumpToNodeName(context);
         }
 
+        public override bool VisitNextToNodeName([NotNull] YarnSpinnerParser.NextToNodeNameContext context)
+        {
+            if (currentNodeInfo == null)
+            {
+                return base.VisitNextToNodeName(context);
+            }
+
+            if (context.destination == null)
+            {
+                // Missing destination; ignore
+                return base.VisitNextToNodeName(context);
+            }
+
+            var jump = new NodeJump(context.destination.Text, context.destination, NodeJump.JumpType.Next);
+            currentNodeInfo.Jumps.Add(jump);
+
+            return base.VisitNextToNodeName(context);
+        }
+
         public override bool VisitFunction_call([NotNull] YarnSpinnerParser.Function_callContext context)
         {
             if (currentNodeInfo == null)

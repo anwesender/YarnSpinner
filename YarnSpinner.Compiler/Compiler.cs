@@ -685,17 +685,32 @@ namespace Yarn.Compiler
                 // Visit every 'set' statement in the parse tree.
                 ParseTreeWalker.WalkTree<YarnSpinnerParser.Set_statementContext>(dialogueContext, (setStatement) =>
                 {
-                    if (setStatement.variable() != null && setStatement.variable().VAR_ID() != null)
+                    // The callback might receive any of the three labeled
+                    // alternatives; only the first two have a named variable we
+                    // can inspect.
+                    YarnSpinnerParser.SetVariableContext? setVar = setStatement as YarnSpinnerParser.SetVariableContext;
+                    YarnSpinnerParser.SetTempVariableContext? setTemp = setStatement as YarnSpinnerParser.SetTempVariableContext;
+
+                    if (setVar?.variable()?.VAR_ID() != null)
                     {
-                        var variableName = setStatement.variable().VAR_ID().GetText();
+                        var variableName = setVar.variable().VAR_ID().GetText();
                         if (smartVariables.ContainsKey(variableName))
                         {
-                            // This set statement is attempting to set a value
-                            // to a smart variable. That's not allowed, because
-                            // smart variables are read-only.
                             diagnostics.Add(new Diagnostic(
                                 file.Name,
-                                setStatement.variable(),
+                                setVar.variable(),
+                                $"{variableName} cannot be modified (it's a smart variable and is always equal to " +
+                                $"{smartVariables[variableName]?.InitialValueParserContext?.GetTextWithWhitespace() ?? "(unknown)"})"));
+                        }
+                    }
+                    else if (setTemp?.temp_variable()?.TEMP_VAR_ID() != null)
+                    {
+                        var variableName = setTemp.temp_variable().TEMP_VAR_ID().GetText();
+                        if (smartVariables.ContainsKey(variableName))
+                        {
+                            diagnostics.Add(new Diagnostic(
+                                file.Name,
+                                setTemp.temp_variable(),
                                 $"{variableName} cannot be modified (it's a smart variable and is always equal to " +
                                 $"{smartVariables[variableName]?.InitialValueParserContext?.GetTextWithWhitespace() ?? "(unknown)"})"));
                         }

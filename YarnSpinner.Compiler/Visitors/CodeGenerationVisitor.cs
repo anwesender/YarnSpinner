@@ -143,37 +143,57 @@ namespace Yarn.Compiler
             return 0;
         }
 
-        // A set command: explicitly setting a value to an expression <<set $foo
-        // to 1>>
-        public override int VisitSet_statement([NotNull] YarnSpinnerParser.Set_statementContext context)
+        // Shared implementation used by all three visitor overrides below.
+        private int GenerateCodeForSetStatement([NotNull] YarnSpinnerParser.Set_statementContext context)
         {
+            // extract helpers depending on which alternative we actually have.
+            YarnSpinnerParser.SetVariableContext? setVar = context as YarnSpinnerParser.SetVariableContext;
+            YarnSpinnerParser.SetTempVariableContext? setTemp = context as YarnSpinnerParser.SetTempVariableContext;
+            YarnSpinnerParser.SetIndirectVariableContext? setIndirect = context as YarnSpinnerParser.SetIndirectVariableContext;
+
+            // Common pieces; note that 'op' and 'expression' are only present on
+            // the first two alternatives, and indirect assignments don't have
+            // an op token (they always use '='). We handle that by checking for
+            // null.
+            var opToken = setVar?.op ?? setTemp?.op;
+            var expr = setVar?.expression() ?? setTemp?.expression();
+            ParserRuleContext? variableCtx = (ParserRuleContext?)setVar?.variable() ?? setTemp?.temp_variable();
+
             // Ensure that the correct result is on the stack by evaluating the
             // expression. If this assignment includes an operation (e.g. +=),
             // do that work here too.
-            switch (context.op.Type)
+            if (opToken != null && expr != null)
             {
-                case YarnSpinnerLexer.OPERATOR_ASSIGNMENT:
-                    this.Visit(context.expression());
-                    break;
-                case YarnSpinnerLexer.OPERATOR_MATHS_ADDITION_EQUALS:
-                    this.GenerateCodeForOperation(Operator.Add, context.op, context.expression().Type, context.variable(), context.expression());
-                    break;
-                case YarnSpinnerLexer.OPERATOR_MATHS_SUBTRACTION_EQUALS:
-                    this.GenerateCodeForOperation(Operator.Minus, context.op, context.expression().Type, context.variable(), context.expression());
-                    break;
-                case YarnSpinnerLexer.OPERATOR_MATHS_MULTIPLICATION_EQUALS:
-                    this.GenerateCodeForOperation(Operator.Multiply, context.op, context.expression().Type, context.variable(), context.expression());
-                    break;
-                case YarnSpinnerLexer.OPERATOR_MATHS_DIVISION_EQUALS:
-                    this.GenerateCodeForOperation(Operator.Divide, context.op, context.expression().Type, context.variable(), context.expression());
-                    break;
-                case YarnSpinnerLexer.OPERATOR_MATHS_MODULUS_EQUALS:
-                    this.GenerateCodeForOperation(Operator.Modulo, context.op, context.expression().Type, context.variable(), context.expression());
-                    break;
+                switch (opToken.Type)
+                {
+                    case YarnSpinnerLexer.OPERATOR_ASSIGNMENT:
+                        this.Visit(expr);
+                        break;
+                    case YarnSpinnerLexer.OPERATOR_MATHS_ADDITION_EQUALS:
+                        this.GenerateCodeForOperation(Operator.Add, opToken, expr.Type, variableCtx, expr);
+                        break;
+                    case YarnSpinnerLexer.OPERATOR_MATHS_SUBTRACTION_EQUALS:
+                        this.GenerateCodeForOperation(Operator.Minus, opToken, expr.Type, variableCtx, expr);
+                        break;
+                    case YarnSpinnerLexer.OPERATOR_MATHS_MULTIPLICATION_EQUALS:
+                        this.GenerateCodeForOperation(Operator.Multiply, opToken, expr.Type, variableCtx, expr);
+                        break;
+                    case YarnSpinnerLexer.OPERATOR_MATHS_DIVISION_EQUALS:
+                        this.GenerateCodeForOperation(Operator.Divide, opToken, expr.Type, variableCtx, expr);
+                        break;
+                    case YarnSpinnerLexer.OPERATOR_MATHS_MODULUS_EQUALS:
+                        this.GenerateCodeForOperation(Operator.Modulo, opToken, expr.Type, variableCtx, expr);
+                        break;
+                }
+            }
+            else if (setIndirect != null)
+            {
+                // indirect set: evaluate the value expression
+                this.Visit(setIndirect.valueExpr);
             }
 
-            // now store the variable and clean up the stack
-            string variableName = context.variable().GetText();
+            // now store the variable (if we have one) and clean up the stack
+            string variableName = variableCtx?.GetText() ?? "<indirect>";
 
             this.compiler.Emit(
                 context.Start,
@@ -182,6 +202,23 @@ namespace Yarn.Compiler
                 new Instruction { Pop = new PopInstruction { } }
             );
             return 0;
+        }
+
+        // Labeled alternatives replaced the generic VisitSet_statement method in
+        // the ANTLR-generated visitor interface. Forward them to the helper.
+        public override int VisitSetVariable([NotNull] YarnSpinnerParser.SetVariableContext context)
+        {
+            return GenerateCodeForSetStatement(context);
+        }
+
+        public override int VisitSetTempVariable([NotNull] YarnSpinnerParser.SetTempVariableContext context)
+        {
+            return GenerateCodeForSetStatement(context);
+        }
+
+        public override int VisitSetIndirectVariable([NotNull] YarnSpinnerParser.SetIndirectVariableContext context)
+        {
+            return GenerateCodeForSetStatement(context);
         }
 
         public override int VisitCall_statement(YarnSpinnerParser.Call_statementContext context)
@@ -648,62 +685,65 @@ namespace Yarn.Compiler
 
             foreach (var lineGroupItem in context.line_group_item())
             {
-                var lineStatement = lineGroupItem.line_statement();
-
-                var lineID = Compiler.GetContentID(ContentIdentifierType.Line, lineGroupItem.line_statement());
-
-                Instruction addCandidateInstruction;
-
-                int conditionCount;
-
-                if (lineStatement.line_condition() != null)
+                if (lineGroupItem is YarnSpinnerParser.LineGroupLineContext lineLine)
                 {
-                    // This line group item has an expression. Evaluate it -
-                    // this will result in the expression's value being left on
-                    // the stack, and possibly give us the name of any 'once'
-                    // variable that may be present.
+                    var lineStatement = lineLine.line_statement();
+                    var lineID = Compiler.GetContentID(ContentIdentifierType.Line, lineStatement);
 
-                    EvaluateLineCondition(lineStatement, out string? onceVariableName);
+                    Instruction addCandidateInstruction;
+                    int conditionCount;
 
-                    if (onceVariableName != null)
+                    if (lineStatement.line_condition() != null)
                     {
-                        onceVariables[lineGroupItem] = onceVariableName;
+                        // This line group item has an expression. Evaluate it -
+                        // this will result in the expression's value being left on
+                        // the stack, and possibly give us the name of any 'once'
+                        // variable that may be present.
+
+                        EvaluateLineCondition(lineStatement, out string? onceVariableName);
+                        if (onceVariableName != null)
+                        {
+                            onceVariables[lineGroupItem] = onceVariableName;
+                        }
+
+                        // Count the number of conditions in the expression:
+                        conditionCount = lineStatement.line_condition().ConditionCount;
+                    }
+                    else
+                    {
+                        this.compiler.Emit(
+                            lineStatement.Start,
+                            lineStatement.Stop,
+                            new Instruction { PushBool = new PushBoolInstruction { Value = true } }
+                        );
+                        conditionCount = 0;
                     }
 
-                    // Count the number of conditions in the expression:
-                    conditionCount = lineStatement.line_condition().ConditionCount;
-                }
-                else
-                {
-                    // There is no expression; push 'true' onto the stack and
-                    // note that it had a complexity of zero
+                    // Add this line group item
                     this.compiler.Emit(
                         lineStatement.Start,
                         lineStatement.Stop,
-                        new Instruction { PushBool = new PushBoolInstruction { Value = true } }
-                    );
-                    conditionCount = 0;
-                }
-
-                // Add this line group item
-                this.compiler.Emit(
-                    lineStatement.Start,
-                    lineStatement.Stop,
-                    addCandidateInstruction = new Instruction
-                    {
-                        AddSaliencyCandidate = new AddSaliencyCandidateInstruction
+                        addCandidateInstruction = new Instruction
                         {
-                            ComplexityScore = conditionCount,
-                            ContentID = lineID,
+                            AddSaliencyCandidate = new AddSaliencyCandidateInstruction
+                            {
+                                ComplexityScore = conditionCount,
+                                ContentID = lineID,
+                            }
                         }
-                    }
-                );
+                    );
 
-                // Remember this add candidate instruction - we'll need to
-                // update where it jumps to later
-                addCandidateInstructions[lineGroupItem] = addCandidateInstruction;
+                    // Remember this add candidate instruction - we'll need to
+                    // update where it jumps to later
+                    addCandidateInstructions[lineGroupItem] = addCandidateInstruction;
 
-                optionCount += 1;
+                    optionCount += 1;
+                }
+                else
+                {
+                    // command items don't participate in saliency; nothing to do
+                    // here.
+                }
             }
 
             Instruction noContentAvailableJump;
@@ -738,81 +778,79 @@ namespace Yarn.Compiler
             // Now generate the code for each of the lines in the group.
             foreach (var lineGroupItem in context.line_group_item())
             {
-                // Ensure that the 'add candidate' instruction that points us to
-                // here has the correct destination
-                addCandidateInstructions[lineGroupItem].Destination = CurrentInstructionNumber;
-
-                // Mark that this instruction, which we jump to, should have a
-                // label
-                this.compiler.CurrentNodeDebugInfo?.AddLabel("run_line_group_item", CurrentInstructionNumber);
-
-                // We got here via a peek-and-jump; we can discard the top of
-                // the stack now.
-                this.compiler.Emit(
-                    lineGroupItem.line_statement().Start,
-                    lineGroupItem.line_statement().Stop,
-                    new Instruction { Pop = new PopInstruction { } }
-                );
-
-                if (onceVariables.TryGetValue(lineGroupItem, out var onceVariable) && onceVariable != null)
+                if (lineGroupItem is YarnSpinnerParser.LineGroupLineContext lineLine)
                 {
-                    // We have a 'once' variable for this line group item. Emit
-                    // code that sets it to 'true', so that we don't see this
-                    // item again.
-                    IToken token = (lineGroupItem.line_statement()?.line_condition() as YarnSpinnerParser.LineOnceConditionContext)?.COMMAND_ONCE().Symbol ?? lineGroupItem.Start;
+                    // Ensure that the 'add candidate' instruction that points us to
+                    // here has the correct destination
+                    addCandidateInstructions[lineGroupItem].Destination = CurrentInstructionNumber;
+
+                    // Mark that this instruction, which we jump to, should have a
+                    // label
+                    this.compiler.CurrentNodeDebugInfo?.AddLabel("run_line_group_item", CurrentInstructionNumber);
+
+                    // We got here via a peek-and-jump; we can discard the top of
+                    // the stack now.
                     this.compiler.Emit(
-                        token,
-                        token,
-                        new Instruction
-                        {
-                            PushBool = new PushBoolInstruction { Value = true },
-                        },
-                        new Instruction
-                        {
-                            StoreVariable = new StoreVariableInstruction { VariableName = onceVariable },
-                        },
+                        lineLine.line_statement().Start,
+                        lineLine.line_statement().Stop,
                         new Instruction { Pop = new PopInstruction { } }
                     );
-                }
 
-                // Run this line. (We don't call Visit(line_statement), because
-                // that would re-evaluate the line condition, which we don't
-                // need or want.)
-
-                var lineFormattedText = lineGroupItem.line_statement().line_formatted_text();
-
-                // Evaluate the inline expressions and push the results onto the
-                // stack.
-                var expressionCount = this.GenerateCodeForExpressionsInFormattedText(lineFormattedText.children);
-                var lineID = lineGroupItem.line_statement().LineID;
-
-                // Run the line.
-                this.compiler.Emit(
-                    lineGroupItem.line_statement().line_formatted_text()?.Start ?? lineGroupItem.Start,
-                    lineGroupItem.line_statement().line_formatted_text()?.Stop ?? lineGroupItem.Stop,
-
-                    new Instruction
+                    if (onceVariables.TryGetValue(lineGroupItem, out var onceVariable) && onceVariable != null)
                     {
-                        RunLine = new RunLineInstruction { LineID = lineID, SubstitutionCount = expressionCount }
+                        IToken token = (lineLine.line_statement()?.line_condition() as YarnSpinnerParser.LineOnceConditionContext)?.COMMAND_ONCE().Symbol ?? lineGroupItem.Start;
+                        this.compiler.Emit(
+                            token,
+                            token,
+                            new Instruction
+                            {
+                                PushBool = new PushBoolInstruction { Value = true },
+                            },
+                            new Instruction
+                            {
+                                StoreVariable = new StoreVariableInstruction { VariableName = onceVariable },
+                            },
+                            new Instruction { Pop = new PopInstruction { } }
+                        );
                     }
-                );
 
-                // For each child statement in this line group item, evaluate
-                // that too.
-                foreach (var childStatement in lineGroupItem.statement())
-                {
-                    this.Visit(childStatement);
+                    var lineFormattedText = lineLine.line_statement().line_formatted_text();
+                    var expressionCount = this.GenerateCodeForExpressionsInFormattedText(lineFormattedText.children);
+                    var lineID = lineLine.line_statement().LineID;
+
+                    this.compiler.Emit(
+                        lineLine.line_statement().line_formatted_text()?.Start ?? lineGroupItem.Start,
+                        lineLine.line_statement().line_formatted_text()?.Stop ?? lineGroupItem.Stop,
+
+                        new Instruction
+                        {
+                            RunLine = new RunLineInstruction { LineID = lineID, SubstitutionCount = expressionCount }
+                        }
+                    );
+
+                    foreach (var childStatement in lineLine.statement())
+                    {
+                        this.Visit(childStatement);
+                    }
+
+                    Instruction jumpToEnd;
+                    this.compiler.Emit(
+                        lineGroupItem.Stop,
+                        lineGroupItem.Stop,
+                        jumpToEnd = new Instruction { JumpTo = new JumpToInstruction { Destination = -1 } }
+                    );
+                    jumpsToEndOfLineGroup.Add(jumpToEnd);
                 }
-
-                // Finally, jump to the end of the group
-                Instruction jumpToEnd;
-
-                this.compiler.Emit(
-                    lineGroupItem.Stop,
-                    lineGroupItem.Stop,
-                    jumpToEnd = new Instruction { JumpTo = new JumpToInstruction { Destination = -1 } }
-                );
-                jumpsToEndOfLineGroup.Add(jumpToEnd);
+                else if (lineGroupItem is YarnSpinnerParser.LineGroupCommandContext lineCmd)
+                {
+                    // command items are not part of the saliency chooser; just
+                    // execute the command and any nested statements
+                    this.Visit(lineCmd.command_statement());
+                    foreach (var childStatement in lineCmd.statement())
+                    {
+                        this.Visit(childStatement);
+                    }
+                }
             }
 
             // Mark all jumps to the end of the group as being here

@@ -204,15 +204,49 @@ namespace YarnLanguageServer
             return base.VisitValueString(context);
         }
 
-        public override bool VisitSet_statement([NotNull] YarnSpinnerParser.Set_statementContext context)
+        // helper that handles coloring for any kind of set statement
+        private bool HandleSetStatement([NotNull] YarnSpinnerParser.Set_statementContext context)
         {
+            // determine which subclass we're dealing with so we can safely
+            // access its fields.
+            YarnSpinnerParser.SetVariableContext? setVar = context as YarnSpinnerParser.SetVariableContext;
+            YarnSpinnerParser.SetTempVariableContext? setTemp = context as YarnSpinnerParser.SetTempVariableContext;
+            YarnSpinnerParser.SetIndirectVariableContext? setIndirect = context as YarnSpinnerParser.SetIndirectVariableContext;
+
             AddTokenType(context.Start, context.Start, SemanticTokenType.Keyword);
             AddTokenType(context.Stop, context.Stop, SemanticTokenType.Keyword);
-            AddTokenType(context.op, context.op, SemanticTokenType.Operator); // =
-            AddTokenType(context.COMMAND_SET(), context.COMMAND_SET(), SemanticTokenType.Keyword);
+            // all three variants expose COMMAND_SET; pick whichever one we have
+            var commandToken = (ITerminalNode?)(setVar?.COMMAND_SET() ?? setTemp?.COMMAND_SET() ?? setIndirect?.COMMAND_SET());
+            if (commandToken != null)
+            {
+                AddTokenType(commandToken, commandToken, SemanticTokenType.Keyword);
+            }
 
-            // AddTokenType(context.expression(), context.expression(), SemanticTokenType.Variable); // $variablename
-            return base.VisitSet_statement(context);
+            var opToken = setVar?.op ?? setTemp?.op;
+            if (opToken != null)
+            {
+                AddTokenType(opToken, opToken, SemanticTokenType.Operator);
+            }
+
+            return true;
+        }
+
+        public override bool VisitSetVariable([NotNull] YarnSpinnerParser.SetVariableContext context)
+        {
+            HandleSetStatement(context);
+            return base.VisitSetVariable(context);
+        }
+
+        public override bool VisitSetTempVariable([NotNull] YarnSpinnerParser.SetTempVariableContext context)
+        {
+            HandleSetStatement(context);
+            return base.VisitSetTempVariable(context);
+        }
+
+        public override bool VisitSetIndirectVariable([NotNull] YarnSpinnerParser.SetIndirectVariableContext context)
+        {
+            HandleSetStatement(context);
+            return base.VisitSetIndirectVariable(context);
         }
 
         public override bool VisitCall_statement([NotNull] YarnSpinnerParser.Call_statementContext context)
@@ -283,6 +317,17 @@ namespace YarnLanguageServer
             return base.VisitJumpToNodeName(context);
         }
 
+        public override bool VisitNextToNodeName([NotNull] YarnSpinnerParser.NextToNodeNameContext context)
+        {
+            AddTokenType(context.Start, context.Start, SemanticTokenType.Keyword); // <<
+            AddTokenType(context.Stop, context.Stop, SemanticTokenType.Keyword); // >>
+
+            AddTokenType(context.COMMAND_NEXT(), SemanticTokenType.Keyword); // next
+            AddTokenType(context.destination, SemanticTokenType.Class); // node_name
+
+            return base.VisitNextToNodeName(context);
+        }
+
         public override bool VisitDetourToExpression([Antlr4.Runtime.Misc.NotNull] YarnSpinnerParser.DetourToExpressionContext context)
         {
             AddTokenType(context.Start, context.Start, SemanticTokenType.Keyword); // <<
@@ -301,6 +346,16 @@ namespace YarnLanguageServer
             AddTokenType(context.COMMAND_JUMP(), SemanticTokenType.Keyword); // jump
 
             return base.VisitJumpToExpression(context);
+        }
+
+        public override bool VisitNextToExpression([NotNull] YarnSpinnerParser.NextToExpressionContext context)
+        {
+            AddTokenType(context.Start, context.Start, SemanticTokenType.Keyword); // <<
+            AddTokenType(context.Stop, context.Stop, SemanticTokenType.Keyword); // >>
+
+            AddTokenType(context.COMMAND_NEXT(), SemanticTokenType.Keyword); // next
+
+            return base.VisitNextToExpression(context);
         }
 
         public override bool VisitHashtag([NotNull] YarnSpinnerParser.HashtagContext context)

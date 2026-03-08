@@ -700,16 +700,100 @@ namespace Yarn.Compiler
             base.ExitElse_if_clause(context);
         }
 
-        public override void ExitSet_statement([NotNull] YarnSpinnerParser.Set_statementContext context)
+        // Helper for the three labelled alternatives created in the grammar.
+        // Each labelled context inherits from Set_statementContext so we can
+        // perform all of the existing logic in one place and avoid duplication.
+        private void HandleSetStatement([NotNull] YarnSpinnerParser.Set_statementContext context)
         {
-            // The type of the expression must be convertible to the type of the
-            // variable
-            IType variableType = context.variable()?.Type ?? Types.Error;
-            IType expressionType = context.expression()?.Type ?? Types.Error;
-            string variableName = context.variable()?.GetText() ?? "<unknown>";
+            // We used to assume that all of the helper's fields (variable(),
+            // expression(), op, etc.) lived on the base Set_statementContext.
+            // After the grammar was refactored with labeled alternatives those
+            // members only exist on the concrete subclasses.  To avoid
+            // duplicating the core logic, we simply pattern‑match up front and
+            // then reuse the same local variables below.
+
+            YarnSpinnerParser.SetVariableContext? setVar = context as YarnSpinnerParser.SetVariableContext;
+            YarnSpinnerParser.SetTempVariableContext? setTemp = context as YarnSpinnerParser.SetTempVariableContext;
+            YarnSpinnerParser.SetIndirectVariableContext? setIndirect = context as YarnSpinnerParser.SetIndirectVariableContext;
+
+            // Determine which type of set statement this is
+            var regularVar = setVar?.variable();
+            var tempVar = setTemp?.temp_variable();
+            var varNameExpr = setIndirect?.varNameExpr;
+            var valueExpr = setIndirect?.valueExpr;
+
+            // there is exactly one expression provided in both the first and
+            // second alternatives of the rule; we just keep a nullable local
+            // for convenience.
+            YarnSpinnerParser.ExpressionContext? singleExpr = setVar?.expression() ?? setTemp?.expression();
+
+            IType variableType;
+            IType expressionType;
+            string variableName;
+
+            // Handle indirect variable assignment: <<set {expr} = value>>
+            if (varNameExpr != null && valueExpr != null)
+            {
+                // The varNameExpr must evaluate to a string (variable name)
+                IType varNameType = varNameExpr.Type ?? Types.Error;
+                this.AddConvertibleConstraint(varNameType, Types.String, context, s => $"Indirect variable name must be a string, not {varNameType.Substitute(s)}");
+
+                // We don't know the type of the indirect variable at compile time,
+                // so we just check that the value expression has some type
+                expressionType = valueExpr.Type ?? Types.Error;
+                variableType = Types.Any;
+                variableName = "<indirect>";
+            }
+            else
+            {
+                // Regular or temp variable assignment
+                if (regularVar != null)
+                {
+                    variableType = regularVar.Type ?? Types.Error;
+                    variableName = regularVar.GetText() ?? "<unknown>";
+                    expressionType = singleExpr?.Type ?? Types.Error;
+                }
+                else if (tempVar != null)
+                {
+                    // Temp variables don't have a pre-determined type; they take the type
+                    // of the expression being assigned to them
+                    variableName = tempVar.GetText() ?? "<unknown>";
+                    expressionType = singleExpr?.Type ?? Types.Error;
+                    variableType = expressionType; // Temp vars are implicitly typed
+                }
+                else
+                {
+                    // Shouldn't happen, but handle gracefully
+                    variableType = Types.Error;
+                    expressionType = Types.Error;
+                    variableName = "<unknown>";
+                }
+            }
 
             this.AddConvertibleConstraint(expressionType, variableType, context, s => $"{variableName} ({variableType.Substitute(s)}) cannot be assigned a {expressionType.Substitute(s)}");
-            base.ExitSet_statement(context);
+        }
+
+        // The listener interface now contains three methods corresponding to the
+        // labelled alternatives inside <set_statement>. The generic
+        // ExitSet_statement method was removed when the grammar added labels,
+        // which is why the old overrides no longer compile.  We simply override
+        // each new method and forward to the helper above.
+        public override void ExitSetVariable([NotNull] YarnSpinnerParser.SetVariableContext context)
+        {
+            HandleSetStatement(context);
+            base.ExitSetVariable(context);
+        }
+
+        public override void ExitSetTempVariable([NotNull] YarnSpinnerParser.SetTempVariableContext context)
+        {
+            HandleSetStatement(context);
+            base.ExitSetTempVariable(context);
+        }
+
+        public override void ExitSetIndirectVariable([NotNull] YarnSpinnerParser.SetIndirectVariableContext context)
+        {
+            HandleSetStatement(context);
+            base.ExitSetIndirectVariable(context);
         }
 
         public override void ExitValueFunc([NotNull] YarnSpinnerParser.ValueFuncContext context)

@@ -31,7 +31,7 @@ header
 header_when_expression
     : expression 
     | (always=EXPRESSION_WHEN_ALWAYS) 
-    | once=COMMAND_ONCE (COMMAND_IF expression)? 
+    | once=COMMAND_ONCE (value)? (COMMAND_IF expression)?
     ;
 
 body
@@ -49,8 +49,11 @@ statement
     | enum_statement
     | jump_statement
     | return_statement
+    | result_statement
     | line_group_statement
     | once_statement
+    | func_statement
+    | invoke_statement
     | INDENT statement* DEDENT
     ;
 
@@ -74,7 +77,7 @@ hashtag
 
 line_condition
     : COMMAND_START COMMAND_IF expression COMMAND_END #lineCondition
-    | COMMAND_START COMMAND_ONCE (COMMAND_IF expression)? COMMAND_END #lineOnceCondition
+    | COMMAND_START COMMAND_ONCE (value)? (COMMAND_IF expression)? COMMAND_END #lineOnceCondition
     ;
 
 expression
@@ -94,13 +97,19 @@ value
     | KEYWORD_TRUE   #valueTrue
     | KEYWORD_FALSE  #valueFalse
     | variable       #valueVar
+    | temp_variable  #valueTempVar
     | STRING #valueString
+    | INDIRECT_START expression EXPRESSION_END #valueIndirect  // indirect variable read: {expr}
     | function_call       #valueFunc
     | typeMemberReference #valueTypeMemberReference
 
     ;
 variable
     : VAR_ID
+    ;
+
+temp_variable
+    : TEMP_VAR_ID
     ;
 
 function_call 
@@ -130,7 +139,9 @@ else_clause
     ;
 
 set_statement
-    : COMMAND_START COMMAND_SET variable op=(OPERATOR_ASSIGNMENT | '*=' | '/=' | '%=' | '+=' | '-=') expression COMMAND_END 
+    : COMMAND_START COMMAND_SET variable op=(OPERATOR_ASSIGNMENT | '*=' | '/=' | '%=' | '+=' | '-=') expression COMMAND_END #setVariable
+    | COMMAND_START COMMAND_SET temp_variable op=(OPERATOR_ASSIGNMENT | '*=' | '/=' | '%=' | '+=' | '-=') expression COMMAND_END #setTempVariable
+    | COMMAND_START COMMAND_SET INDIRECT_START varNameExpr=expression EXPRESSION_END OPERATOR_ASSIGNMENT valueExpr=expression COMMAND_END #setIndirectVariable
     ;
 
 call_statement
@@ -158,11 +169,13 @@ line_group_statement
     ;
 
 line_group_item
-    : '=>' line_statement (INDENT statement* DEDENT)?
+    : '=>' line_statement (INDENT statement* DEDENT)?  #lineGroupLine
+    | '=>' command_statement (INDENT statement* DEDENT)? #lineGroupCommand
     ;
 
 declare_statement
     : COMMAND_START COMMAND_DECLARE variable OPERATOR_ASSIGNMENT expression ('as' type=FUNC_ID)? COMMAND_END
+    | COMMAND_START COMMAND_DECLARE temp_variable OPERATOR_ASSIGNMENT expression ('as' type=FUNC_ID)? COMMAND_END
     ;
 
 enum_statement
@@ -178,10 +191,19 @@ jump_statement
     | COMMAND_START COMMAND_JUMP EXPRESSION_START expression EXPRESSION_END COMMAND_END #jumpToExpression
     | COMMAND_START COMMAND_DETOUR destination=ID COMMAND_END #detourToNodeName
     | COMMAND_START COMMAND_DETOUR EXPRESSION_START expression EXPRESSION_END COMMAND_END #detourToExpression
+    | COMMAND_START COMMAND_NEXT destination=ID COMMAND_END #nextToNodeName
+    | COMMAND_START COMMAND_NEXT EXPRESSION_START expression EXPRESSION_END COMMAND_END #nextToExpression
     ;
 
 return_statement
     : COMMAND_START COMMAND_RETURN COMMAND_END
+    ;
+
+// Return a value from a Yarn function
+// Usage: <<result expression>>
+// This pushes the expression result onto the stack and returns from the function
+result_statement
+    : COMMAND_START COMMAND_RESULT expression COMMAND_END
     ;
 
 once_statement
@@ -191,11 +213,47 @@ once_statement
     ;
     
 once_primary_clause
-    : COMMAND_START COMMAND_ONCE (COMMAND_IF expression)? COMMAND_END statement*
+    : COMMAND_START COMMAND_ONCE (value)? (COMMAND_IF expression)? COMMAND_END statement*
     ;
 
 once_alternate_clause
     : COMMAND_START COMMAND_ELSE COMMAND_END statement*
+    ;
+
+// User-defined Yarn functions with temporary parameters
+// Usage: <<func myFunction(~param1, ~param2)>>
+func_statement
+    : func_header
+      statement*
+      COMMAND_START COMMAND_ENDFUNC COMMAND_END
+    ;
+
+func_header
+    : COMMAND_START COMMAND_FUNC name=FUNC_ID LPAREN func_params? RPAREN COMMAND_END
+    ;
+
+func_params
+    : func_param (COMMA func_param)*
+    ;
+
+func_param
+    : TEMP_VAR_ID (OPERATOR_ASSIGNMENT expression)?   // ~paramName with optional default value
+    ;
+
+// Invoke a Yarn function with arguments and optional return value
+// Command-style syntax (no parentheses or commas):
+// Usage: <<invoke myFunction arg1 arg2>>
+// Usage: <<invoke ~result = myFunction arg1 arg2>>
+// Usage: <<invoke $result = myFunction arg1 arg2>>
+invoke_statement
+    : COMMAND_START COMMAND_INVOKE temp_variable OPERATOR_ASSIGNMENT FUNC_ID invoke_args? COMMAND_END #invokeWithTempReturn
+    | COMMAND_START COMMAND_INVOKE variable OPERATOR_ASSIGNMENT FUNC_ID invoke_args? COMMAND_END #invokeWithPersistentReturn
+    | COMMAND_START COMMAND_INVOKE FUNC_ID invoke_args? COMMAND_END #invokeNoReturn
+    ;
+
+// Arguments to invoke are space-separated expressions
+invoke_args
+    : expression+
     ;
 
 structured_command

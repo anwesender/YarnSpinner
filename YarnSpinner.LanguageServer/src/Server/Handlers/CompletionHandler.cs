@@ -764,6 +764,7 @@ namespace YarnLanguageServer.Handlers
             { "COMMAND_CALL", "call" },
             { "COMMAND_DECLARE", "declare" },
             { "COMMAND_JUMP", "jump " },
+            { "COMMAND_NEXT", "next " },
             { "KEYWORD_FALSE", "false" },
             { "KEYWORD_TRUE", "true" },
             { "KEYWORD_NULL", "null" },
