@@ -265,6 +265,10 @@ COMMA : ',' ;
 
 EXPRESSION_AS: 'as';
 
+// Nested/indirect expression start - pushes another ExpressionMode for {expr} syntax
+// Used for indirect variable access like {$varName} or {"$prefix_" + $suffix}
+INDIRECT_START: '{' -> pushMode(ExpressionMode);
+
 TYPE_STRING: 'string' -> type(FUNC_ID);
 TYPE_NUMBER: 'number' -> type(FUNC_ID);
 TYPE_BOOL: 'bool' -> type(FUNC_ID);
@@ -282,6 +286,10 @@ EXPRESSION_COMMAND_END: '>>' -> type(COMMAND_END), popMode, popMode;
 
 // Variables, which always begin with a '$'
 VAR_ID : '$' ID ;
+
+// Temporary variables, which always begin with a '~'
+// These are scoped to the current function/node and cleaned up on exit
+TEMP_VAR_ID : '~' ID ;
 
 // Dots ('.')
 DOT : '.' ;
@@ -329,6 +337,8 @@ COMMAND_JUMP: 'jump'  {IsEndOfCommandKeyword()}? -> pushMode(CommandIDOrExpressi
 
 COMMAND_DETOUR: 'detour'   {IsEndOfCommandKeyword()}? -> pushMode(CommandIDOrExpressionMode);
 
+COMMAND_NEXT: 'next'  {IsEndOfCommandKeyword()}? -> pushMode(CommandIDOrExpressionMode);
+
 COMMAND_RETURN: 'return'  {IsEndOfCommandKeyword()}? ; // next expected token after 'return' is '>>' so no whitespace is strictly needed 
 
 COMMAND_ENUM: 'enum'  {IsEndOfCommandKeyword()}? -> pushMode(CommandIDMode);
@@ -339,6 +349,12 @@ COMMAND_ENDENUM: 'endenum'  {IsEndOfCommandKeyword()}?;
 
 COMMAND_ONCE: 'once' {IsEndOfCommandKeyword()}?;
 COMMAND_ENDONCE: 'endonce'  {IsEndOfCommandKeyword()}?;
+
+// Yarn function commands (user-defined functions in Yarn)
+COMMAND_FUNC: 'func'  {IsEndOfCommandKeyword()}? -> pushMode(ExpressionMode);
+COMMAND_ENDFUNC: 'endfunc'  {IsEndOfCommandKeyword()}?;
+COMMAND_INVOKE: 'invoke'  {IsEndOfCommandKeyword()}? -> pushMode(ExpressionMode);
+COMMAND_RESULT: 'result'  {IsEndOfCommandKeyword()}? -> pushMode(ExpressionMode);
 
 // Keywords reserved for future language versions
 COMMAND_LOCAL: 'local' {IsEndOfCommandKeyword()}?; 

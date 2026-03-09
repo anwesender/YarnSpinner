@@ -283,6 +283,17 @@ namespace YarnLanguageServer
             return base.VisitJumpToNodeName(context);
         }
 
+        public override bool VisitNextToNodeName([NotNull] YarnSpinnerParser.NextToNodeNameContext context)
+        {
+            AddTokenType(context.Start, context.Start, SemanticTokenType.Keyword); // <<
+            AddTokenType(context.Stop, context.Stop, SemanticTokenType.Keyword); // >>
+
+            AddTokenType(context.COMMAND_NEXT(), SemanticTokenType.Keyword); // next
+            AddTokenType(context.destination, SemanticTokenType.Class); // node_name
+
+            return base.VisitNextToNodeName(context);
+        }
+
         public override bool VisitDetourToExpression([Antlr4.Runtime.Misc.NotNull] YarnSpinnerParser.DetourToExpressionContext context)
         {
             AddTokenType(context.Start, context.Start, SemanticTokenType.Keyword); // <<
@@ -301,6 +312,16 @@ namespace YarnLanguageServer
             AddTokenType(context.COMMAND_JUMP(), SemanticTokenType.Keyword); // jump
 
             return base.VisitJumpToExpression(context);
+        }
+
+        public override bool VisitNextToExpression([NotNull] YarnSpinnerParser.NextToExpressionContext context)
+        {
+            AddTokenType(context.Start, context.Start, SemanticTokenType.Keyword); // <<
+            AddTokenType(context.Stop, context.Stop, SemanticTokenType.Keyword); // >>
+
+            AddTokenType(context.COMMAND_NEXT(), SemanticTokenType.Keyword); // next
+
+            return base.VisitNextToExpression(context);
         }
 
         public override bool VisitHashtag([NotNull] YarnSpinnerParser.HashtagContext context)

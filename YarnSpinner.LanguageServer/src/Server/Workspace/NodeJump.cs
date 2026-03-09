@@ -41,5 +41,10 @@ public record NodeJump
         /// The jump is a detour.
         /// </summary>
         Detour,
+
+        /// <summary>
+        /// The jump is a "next" jump.
+        /// </summary>
+        Next,
     }
 }

@@ -77,5 +77,16 @@ namespace Yarn.Compiler
             var destination = context.expression().GetText();
             jumps.Add(destination);
         }
+        public override void EnterNextToNodeName([NotNull] YarnSpinnerParser.NextToNodeNameContext context)
+        {
+            var destination = context.destination.Text;
+            jumps.Add(destination);
+        }
+
+        public override void EnterNextToExpression([NotNull] YarnSpinnerParser.NextToExpressionContext context)
+        {
+            var destination = context.expression().GetText();
+            jumps.Add(destination);
+        }
     }
 }

@@ -702,11 +702,55 @@ namespace Yarn.Compiler
 
         public override void ExitSet_statement([NotNull] YarnSpinnerParser.Set_statementContext context)
         {
-            // The type of the expression must be convertible to the type of the
-            // variable
-            IType variableType = context.variable()?.Type ?? Types.Error;
-            IType expressionType = context.expression()?.Type ?? Types.Error;
-            string variableName = context.variable()?.GetText() ?? "<unknown>";
+            // Determine which type of set statement this is
+            var regularVar = context.variable();
+            var tempVar = context.temp_variable();
+            var varNameExpr = context.varNameExpr;
+            var valueExpr = context.valueExpr;
+
+            IType variableType;
+            IType expressionType;
+            string variableName;
+
+            // Handle indirect variable assignment: <<set {expr} = value>>
+            if (varNameExpr != null && valueExpr != null)
+            {
+                // The varNameExpr must evaluate to a string (variable name)
+                IType varNameType = varNameExpr.Type ?? Types.Error;
+                this.AddConvertibleConstraint(varNameType, Types.String, context, s => $"Indirect variable name must be a string, not {varNameType.Substitute(s)}");
+
+                // We don't know the type of the indirect variable at compile time,
+                // so we just check that the value expression has some type
+                expressionType = valueExpr.Type ?? Types.Error;
+                variableType = Types.Any;
+                variableName = "<indirect>";
+            }
+            else
+            {
+                // Regular or temp variable assignment
+                var expressions = context.expression();
+                if (regularVar != null)
+                {
+                    variableType = regularVar.Type ?? Types.Error;
+                    variableName = regularVar.GetText() ?? "<unknown>";
+                    expressionType = expressions.Length > 0 ? (expressions[0].Type ?? Types.Error) : Types.Error;
+                }
+                else if (tempVar != null)
+                {
+                    // Temp variables don't have a pre-determined type; they take the type
+                    // of the expression being assigned to them
+                    variableName = tempVar.GetText() ?? "<unknown>";
+                    expressionType = expressions.Length > 0 ? (expressions[0].Type ?? Types.Error) : Types.Error;
+                    variableType = expressionType; // Temp vars are implicitly typed
+                }
+                else
+                {
+                    // Shouldn't happen, but handle gracefully
+                    variableType = Types.Error;
+                    expressionType = Types.Error;
+                    variableName = "<unknown>";
+                }
+            }
 
             this.AddConvertibleConstraint(expressionType, variableType, context, s => $"{variableName} ({variableType.Substitute(s)}) cannot be assigned a {expressionType.Substitute(s)}");
             base.ExitSet_statement(context);

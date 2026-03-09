@@ -239,6 +239,63 @@ namespace YarnLanguageServer
             return base.VisitJumpToNodeName(context);
         }
 
+        public override bool VisitJumpToExpression([NotNull] YarnSpinnerParser.JumpToExpressionContext context)
+        {
+            if (currentNodeInfo == null)
+            {
+                return base.VisitJumpToExpression(context);
+            }
+
+            if (context.expression() == null)
+            {
+                // Missing destination; ignore
+                return base.VisitJumpToExpression(context);
+            }
+
+            var destination = context.expression().GetText();
+            var jump = new NodeJump(destination, context.expression().Start, NodeJump.JumpType.Jump);
+            currentNodeInfo.Jumps.Add(jump);
+
+            return base.VisitJumpToExpression(context);
+        }
+
+        public override bool VisitNextToNodeName([NotNull] YarnSpinnerParser.NextToNodeNameContext context)
+        {
+            if (currentNodeInfo == null)
+            {
+                return base.VisitNextToNodeName(context);
+            }
+
+            if (context.destination == null)
+            {
+                return base.VisitNextToNodeName(context);
+            }
+
+            var jump = new NodeJump(context.destination.Text, context.destination, NodeJump.JumpType.Next);
+            currentNodeInfo.Jumps.Add(jump);
+
+            return base.VisitNextToNodeName(context);
+        }
+
+        public override bool VisitNextToExpression([NotNull] YarnSpinnerParser.NextToExpressionContext context)
+        {
+            if (currentNodeInfo == null)
+            {
+                return base.VisitNextToExpression(context);
+            }
+
+            if (context.expression() == null)
+            {
+                return base.VisitNextToExpression(context);
+            }
+
+            var destination = context.expression().GetText();
+            var jump = new NodeJump(destination, context.expression().Start, NodeJump.JumpType.Next);
+            currentNodeInfo.Jumps.Add(jump);
+
+            return base.VisitNextToExpression(context);
+        }
+
         public override bool VisitFunction_call([NotNull] YarnSpinnerParser.Function_callContext context)
         {
             if (currentNodeInfo == null)

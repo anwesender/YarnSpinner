@@ -147,34 +147,67 @@ namespace Yarn.Compiler
         // to 1>>
         public override int VisitSet_statement([NotNull] YarnSpinnerParser.Set_statementContext context)
         {
+            // Determine which type of set statement this is
+            var regularVar = context.variable();
+            var tempVar = context.temp_variable();
+            var varNameExpr = context.varNameExpr;
+            var expressions = context.expression();
+            var valueExpr = context.valueExpr;
+
+            // Handle indirect variable assignment: <<set {expr} = value>>
+            if (varNameExpr != null && valueExpr != null)
+            {
+                // For indirect assignment, we need to evaluate both expressions
+                // However, the runtime doesn't currently support this feature
+                throw new System.NotImplementedException("Indirect variable assignment (<<set {expr} = value>>) is not yet supported in the runtime");
+            }
+
+            // For regular and temp variables, get the variable name and expression
+            string variableName;
+            YarnSpinnerParser.ExpressionContext expression;
+
+            if (regularVar != null)
+            {
+                variableName = regularVar.GetText();
+                expression = expressions[0];
+            }
+            else if (tempVar != null)
+            {
+                variableName = tempVar.GetText();
+                expression = expressions[0];
+            }
+            else
+            {
+                // This shouldn't happen, but handle gracefully
+                return 0;
+            }
+
             // Ensure that the correct result is on the stack by evaluating the
             // expression. If this assignment includes an operation (e.g. +=),
             // do that work here too.
             switch (context.op.Type)
             {
                 case YarnSpinnerLexer.OPERATOR_ASSIGNMENT:
-                    this.Visit(context.expression());
+                    this.Visit(expression);
                     break;
                 case YarnSpinnerLexer.OPERATOR_MATHS_ADDITION_EQUALS:
-                    this.GenerateCodeForOperation(Operator.Add, context.op, context.expression().Type, context.variable(), context.expression());
+                    this.GenerateCodeForOperation(Operator.Add, context.op, expression.Type, (Antlr4.Runtime.ParserRuleContext)(regularVar ?? (object)tempVar), expression);
                     break;
                 case YarnSpinnerLexer.OPERATOR_MATHS_SUBTRACTION_EQUALS:
-                    this.GenerateCodeForOperation(Operator.Minus, context.op, context.expression().Type, context.variable(), context.expression());
+                    this.GenerateCodeForOperation(Operator.Minus, context.op, expression.Type, (Antlr4.Runtime.ParserRuleContext)(regularVar ?? (object)tempVar), expression);
                     break;
                 case YarnSpinnerLexer.OPERATOR_MATHS_MULTIPLICATION_EQUALS:
-                    this.GenerateCodeForOperation(Operator.Multiply, context.op, context.expression().Type, context.variable(), context.expression());
+                    this.GenerateCodeForOperation(Operator.Multiply, context.op, expression.Type, (Antlr4.Runtime.ParserRuleContext)(regularVar ?? (object)tempVar), expression);
                     break;
                 case YarnSpinnerLexer.OPERATOR_MATHS_DIVISION_EQUALS:
-                    this.GenerateCodeForOperation(Operator.Divide, context.op, context.expression().Type, context.variable(), context.expression());
+                    this.GenerateCodeForOperation(Operator.Divide, context.op, expression.Type, (Antlr4.Runtime.ParserRuleContext)(regularVar ?? (object)tempVar), expression);
                     break;
                 case YarnSpinnerLexer.OPERATOR_MATHS_MODULUS_EQUALS:
-                    this.GenerateCodeForOperation(Operator.Modulo, context.op, context.expression().Type, context.variable(), context.expression());
+                    this.GenerateCodeForOperation(Operator.Modulo, context.op, expression.Type, (Antlr4.Runtime.ParserRuleContext)(regularVar ?? (object)tempVar), expression);
                     break;
             }
 
             // now store the variable and clean up the stack
-            string variableName = context.variable().GetText();
-
             this.compiler.Emit(
                 context.Start,
                 context.Stop,
@@ -472,7 +505,7 @@ namespace Yarn.Compiler
                 // Make this option's AddOption instruction point at where we
                 // are now.
                 addOptionInstructions[optionCount].Destination = CurrentInstructionNumber;
-                
+
                 // top of the stack contains our jumped destination, popping that off the stack
                 compiler.Emit(new Instruction { Pop = new PopInstruction { } });
 
@@ -1125,11 +1158,26 @@ namespace Yarn.Compiler
             return 0;
         }
 
+        public override int VisitNextToNodeName([NotNull] YarnSpinnerParser.NextToNodeNameContext context)
+        {
+            // 'next' behaves like a normal jump at runtime; presentation differs in the graph
+            EmitJumpToNamedNode(context, context.destination.Text, detour: false);
+
+            return 0;
+        }
+
 
         // A <<jump>> command, which immediately jumps to another node, given an
         // expression that resolves to a node's name.
         public override int VisitJumpToExpression([NotNull] YarnSpinnerParser.JumpToExpressionContext context)
         {
+            EmitJumpToExpression(context, context.expression(), detour: false);
+            return 0;
+        }
+
+        public override int VisitNextToExpression([NotNull] YarnSpinnerParser.NextToExpressionContext context)
+        {
+            // 'next' behaves like a normal jump at runtime; presentation differs in the graph
             EmitJumpToExpression(context, context.expression(), detour: false);
             return 0;
         }
